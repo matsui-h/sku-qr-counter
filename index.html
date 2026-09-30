@@ -92,18 +92,19 @@ let scanner=null, running=false, lastScan="", lastScanAt=0;
 function day(){const k=todayKey(); if(!db[k]) db[k]={items:{},history:[]}; return db[k]}
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
-function vibrate(){if(navigator.vibrate) navigator.vibrate(100)}
+function vibrate(){ try { if (navigator.vibrate) navigator.vibrate([80,40,80]); } catch(e) {} }
 function render(){
  const d=day(), rows=Object.entries(d.items).sort((a,b)=>a[0].localeCompare(b[0]));
  document.getElementById("today").textContent=todayKey();
  document.getElementById("countLabel").textContent=rows.length+" SKU";
  document.getElementById("summary").innerHTML=rows.length?rows.map(([sku,n])=>
-   `<tr><td>${esc(sku)}</td><td class="qty">${n}<button class="minus" onclick="minus(${JSON.stringify(sku)})">−1</button></td></tr>`).join("")
+   `<tr><td>${esc(sku)}</td><td class="qty">${n}<button class="minus" data-sku="${esc(sku)}">−1</button></td></tr>`).join("")
    :'<tr><td colspan="2" class="small">まだ読み取りがありません</td></tr>';
  document.getElementById("total").textContent="合計 "+rows.reduce((s,[,n])=>s+n,0)+"個";
  document.getElementById("history").innerHTML=d.history.length?
    d.history.slice().reverse().map(x=>`<div>${esc(x.time)}　${esc(x.sku)}　<span>${x.delta>0?"+1":"−1"}</span> → ${x.after}</div>`).join("")
    :'<div class="small">履歴なし</div>';
+ document.querySelectorAll(".minus").forEach(btn => { btn.addEventListener("click", () => minus(btn.dataset.sku)); });
  renderDates();
 }
 function add(sku,delta=1){
@@ -112,7 +113,7 @@ function add(sku,delta=1){
  if(after===0) delete d.items[sku]; else d.items[sku]=after;
  d.history.push({time:new Date().toLocaleTimeString("ja-JP"),sku,delta,after});
  save(); render();
- if(delta>0){vibrate(); document.getElementById("last").innerHTML=`最終読み取り：<strong>${esc(sku)}</strong>　＋1 → ${after}`;}
+ if(delta>0){ vibrate(); document.getElementById("last").innerHTML=`最終読み取り：<strong>${esc(sku)}</strong>　＋1 → ${after}`; document.getElementById("status").textContent="読み取り成功 ✓";}
 }
 function minus(sku){add(sku,-1)}
 window.minus=minus;
