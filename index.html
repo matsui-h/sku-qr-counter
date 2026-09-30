@@ -17,8 +17,6 @@ main{max-width:720px;margin:auto;padding:14px}
 #reader{width:100%;overflow:hidden;border-radius:12px;background:#111;min-height:120px}
 button,select{font:inherit;border:0;border-radius:10px;padding:11px 14px;background:#222;color:#fff}
 #scanBtn{background:#0b6bcb;font-weight:700}
-.latest-row td{background:#fff3bf}
-.latest-qty{background:#ffe08a !important;border-radius:8px;font-weight:800}
 button.secondary{background:#eee;color:#222}button.danger{background:#b42318}
 button:disabled{opacity:.45}
 .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -91,7 +89,7 @@ details summary{cursor:pointer;font-weight:700}
 const KEY="sku_qr_counter_v1";
 const todayKey=()=>new Date().toLocaleDateString("sv-SE");
 let db=JSON.parse(localStorage.getItem(KEY)||"{}");
-let scanner=null, running=false, scanning=false, latestSku=null;
+let scanner=null, running=false, scanning=false;
 
 function day(){const k=todayKey(); if(!db[k]) db[k]={items:{},history:[]}; return db[k]}
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
@@ -101,14 +99,9 @@ function render(){
  const d=day(), rows=Object.entries(d.items);
  document.getElementById("today").textContent=todayKey();
  document.getElementById("countLabel").textContent=rows.length+" SKU";
- document.getElementById("summary").innerHTML=rows.length?rows.map(([sku,n])=>{
-   const isLatest=latestSku!==null && sku===latestSku;
-   return `<tr class="${isLatest?'latest-row':''}">
-     <td>${esc(sku)}</td>
-     <td class="qty ${isLatest?'latest-qty':''}">${n}<button class="minus" data-sku="${esc(sku)}">−1</button></td>
-   </tr>`;
- }).join("")
- :'<tr><td colspan="2" class="small">まだ読み取りがありません</td></tr>';
+ document.getElementById("summary").innerHTML=rows.length?rows.map(([sku,n])=>
+   `<tr><td>${esc(sku)}</td><td class="qty">${n}<button class="minus" data-sku="${esc(sku)}">−1</button></td></tr>`).join("")
+   :'<tr><td colspan="2" class="small">まだ読み取りがありません</td></tr>';
  document.getElementById("total").textContent="合計 "+rows.reduce((s,[,n])=>s+n,0)+"個";
  document.getElementById("history").innerHTML=d.history.length?
    d.history.slice().reverse().map(x=>`<div>${esc(x.time)}　${esc(x.sku)}　<span>${x.delta>0?"+1":"−1"}</span> → ${x.after}</div>`).join("")
@@ -135,7 +128,6 @@ function beep(){
 function add(sku,delta=1){
  sku=String(sku).trim(); if(!sku)return;
  const d=day();
- latestSku=sku;
  const exists=Object.prototype.hasOwnProperty.call(d.items,sku);
  const before=exists ? d.items[sku] : 0;
  const after=Math.max(0,before+delta);
@@ -164,15 +156,11 @@ window.minus=minus;
 
 async function start(){
  if(running)return;
- const startBtn=document.getElementById("startBtn");
- const scanBtn=document.getElementById("scanBtn");
- const stopBtn=document.getElementById("stopBtn");
- const status=document.getElementById("status");
  try{
    audioCtx=audioCtx || new (window.AudioContext||window.webkitAudioContext)();
    if(audioCtx.state==="suspended") await audioCtx.resume();
  }catch(e){}
- status.textContent="カメラを起動しています…";
+ document.getElementById("status").textContent="カメラを起動しています…";
  scanner=new Html5Qrcode("reader");
  try{
    await scanner.start(
@@ -186,18 +174,14 @@ async function start(){
    startBtn.disabled=true;
    scanBtn.disabled=false;
    stopBtn.disabled=false;
-   status.textContent="カメラ起動中。QRを合わせて「QRを読み取る」を押してください。押すと次に認識したQRを1回だけ読み取ります。";
+   document.getElementById("status").textContent="カメラ起動中。QRを合わせて「QRを読み取る」を押してください。押すと次に認識したQRを1回だけ読み取ります。";
  }catch(e){
    scanner=null;
-   const detail = e && e.message ? ` (${e.message})` : "";
-   status.textContent="カメラを起動できませんでした。Safariのカメラ許可とHTTPS接続を確認してください。" + detail;
+   document.getElementById("status").textContent="カメラを起動できませんでした。Safariのカメラ許可とHTTPS接続を確認してください。";
  }
 }
 
 async function stop(){
- const startBtn=document.getElementById("startBtn");
- const scanBtn=document.getElementById("scanBtn");
- const stopBtn=document.getElementById("stopBtn");
  if(!scanner)return;
  try{await scanner.stop();scanner.clear()}catch(e){}
  scanner=null;
@@ -210,7 +194,6 @@ async function stop(){
 }
 
 function scanOnce(){
- const scanBtn=document.getElementById("scanBtn");
  if(!running || scanning)return;
  scanning=true;
  scanBtn.disabled=true;
@@ -218,7 +201,6 @@ function scanOnce(){
 }
 
 function onScan(text){
- const scanBtn=document.getElementById("scanBtn");
  if(!scanning)return;
  scanning=false;
  add(text,1);
@@ -226,9 +208,9 @@ function onScan(text){
  document.getElementById("status").textContent="読み取り成功 ✓　次の商品はQRを合わせてボタンを押してください。";
 }
 
-document.getElementById("startBtn").addEventListener("click", start);
-document.getElementById("scanBtn").addEventListener("click", scanOnce);
-document.getElementById("stopBtn").addEventListener("click", stop);
+startBtn.onclick=start;
+scanBtn.onclick=scanOnce;
+stopBtn.onclick=stop;
 
 
 function csv(rows){return rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\\n")}
@@ -247,7 +229,7 @@ exportHistoryBtn.onclick=()=>{
 };
 resetBtn.onclick=()=>{
  if(confirm("今日の集計・履歴をすべて削除します。よろしいですか？")){
-   db[todayKey()]={items:{},history:[]};latestSku=null;save();render();
+   db[todayKey()]={items:{},history:[]};save();render();
  }
 };
 function renderDates(){
