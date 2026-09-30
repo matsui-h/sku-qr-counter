@@ -107,6 +107,22 @@ function render(){
  document.querySelectorAll(".minus").forEach(btn => { btn.addEventListener("click", () => minus(btn.dataset.sku)); });
  renderDates();
 }
+let audioCtx=null;
+function beep(){
+  try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.type="sine";
+    osc.frequency.value=880;
+    gain.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12,audioCtx.currentTime+0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.09);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime+0.1);
+  }catch(e){}
+}
 function add(sku,delta=1){
  sku=String(sku).trim(); if(!sku)return;
  const d=day(); const before=d.items[sku]||0; const after=Math.max(0,before+delta);
@@ -125,6 +141,10 @@ function onScan(text){
 }
 async function start(){
  if(running)return;
+ try{
+   audioCtx=audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+   if(audioCtx.state==="suspended") await audioCtx.resume();
+ }catch(e){}
  document.getElementById("status").textContent="カメラを起動しています…";
  scanner=new Html5Qrcode("reader");
  try{
