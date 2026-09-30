@@ -16,6 +16,7 @@ main{max-width:720px;margin:auto;padding:14px}
 .card{background:#fff;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 1px 4px #0001}
 #reader{width:100%;overflow:hidden;border-radius:12px;background:#111;min-height:120px}
 button,select{font:inherit;border:0;border-radius:10px;padding:11px 14px;background:#222;color:#fff}
+#scanBtn{background:#0b6bcb;font-weight:700}
 button.secondary{background:#eee;color:#222}button.danger{background:#b42318}
 button:disabled{opacity:.45}
 .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
@@ -41,7 +42,8 @@ details summary{cursor:pointer;font-weight:700}
   <div id="reader"></div>
   <div class="controls">
     <button id="startBtn">カメラを開始</button>
-    <button id="stopBtn" class="secondary" disabled>停止</button>
+    <button id="scanBtn" disabled>QRを読み取る</button>
+    <button id="stopBtn" class="secondary" disabled>カメラ停止</button>
   </div>
   <div class="status" id="status">「カメラを開始」を押してください。</div>
   <div class="last" id="last"></div>
@@ -87,7 +89,7 @@ details summary{cursor:pointer;font-weight:700}
 const KEY="sku_qr_counter_v1";
 const todayKey=()=>new Date().toLocaleDateString("sv-SE");
 let db=JSON.parse(localStorage.getItem(KEY)||"{}");
-let scanner=null, running=false, lastScan="", lastScanAt=0;
+let scanner=null, running=false, scanning=false;
 
 function day(){const k=todayKey(); if(!db[k]) db[k]={items:{},history:[]}; return db[k]}
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
@@ -134,11 +136,6 @@ function add(sku,delta=1){
 function minus(sku){add(sku,-1)}
 window.minus=minus;
 
-function onScan(text){
- const now=Date.now();
- if(text===lastScan && now-lastScanAt<900)return;
- lastScan=text; lastScanAt=now; add(text,1);
-}
 async function start(){
  if(running)return;
  try{
@@ -148,20 +145,55 @@ async function start(){
  document.getElementById("status").textContent="カメラを起動しています…";
  scanner=new Html5Qrcode("reader");
  try{
-   await scanner.start({facingMode:"environment"},{fps:10,qrbox:{width:250,height:250}},onScan,()=>{});
-   running=true; startBtn.disabled=true; stopBtn.disabled=false;
-   document.getElementById("status").textContent="QRをカメラにかざしてください。";
+   await scanner.start(
+     {facingMode:"environment"},
+     {fps:15,qrbox:{width:250,height:250}},
+     onScan,
+     ()=>{}
+   );
+   running=true;
+   scanning=false;
+   startBtn.disabled=true;
+   scanBtn.disabled=false;
+   stopBtn.disabled=false;
+   document.getElementById("status").textContent="カメラ起動中。QRを合わせて「QRを読み取る」を押してください。押すと次に認識したQRを1回だけ読み取ります。";
  }catch(e){
+   scanner=null;
    document.getElementById("status").textContent="カメラを起動できませんでした。Safariのカメラ許可とHTTPS接続を確認してください。";
  }
 }
+
 async function stop(){
  if(!scanner)return;
  try{await scanner.stop();scanner.clear()}catch(e){}
- running=false;startBtn.disabled=false;stopBtn.disabled=true;
+ scanner=null;
+ running=false;
+ scanning=false;
+ startBtn.disabled=false;
+ scanBtn.disabled=true;
+ stopBtn.disabled=true;
  document.getElementById("status").textContent="カメラを停止しました。";
 }
-startBtn.onclick=start; stopBtn.onclick=stop;
+
+function scanOnce(){
+ if(!running || scanning)return;
+ scanning=true;
+ scanBtn.disabled=true;
+ document.getElementById("status").textContent="読み取り中…";
+}
+
+function onScan(text){
+ if(!scanning)return;
+ scanning=false;
+ add(text,1);
+ scanBtn.disabled=false;
+ document.getElementById("status").textContent="読み取り成功 ✓　次の商品はQRを合わせてボタンを押してください。";
+}
+
+startBtn.onclick=start;
+scanBtn.onclick=scanOnce;
+stopBtn.onclick=stop;
+
 
 function csv(rows){return rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\\n")}
 function download(name,text){
