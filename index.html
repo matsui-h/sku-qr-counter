@@ -23,7 +23,7 @@ button:disabled{opacity:.45}
 .status{font-size:14px;margin-top:10px;min-height:20px}
 .last{font-size:15px;margin-top:10px}.last strong{font-size:19px}
 table{width:100%;border-collapse:collapse}th,td{padding:10px 5px;border-bottom:1px solid #eee;text-align:left}th:last-child,td:last-child{text-align:right}
-.qty{font-weight:700;text-align:right}.minus{padding:6px 10px;margin-left:8px;background:#eee;color:#222}
+.qty{font-weight:700;text-align:right}.latest-row td{background:#fff3bf}.latest-qty{background:#ffe08a !important;border-radius:8px;font-weight:800}.minus{padding:6px 10px;margin-left:8px;background:#eee;color:#222}
 .total{font-size:18px;font-weight:700;text-align:right;margin-top:12px}
 .history{max-height:280px;overflow:auto;font-size:13px}.history div{padding:7px 0;border-bottom:1px solid #eee}
 .small{font-size:12px;color:#666}
@@ -89,18 +89,22 @@ details summary{cursor:pointer;font-weight:700}
 const KEY="sku_qr_counter_v1";
 const todayKey=()=>new Date().toLocaleDateString("sv-SE");
 let db=JSON.parse(localStorage.getItem(KEY)||"{}");
-let scanner=null, running=false, scanning=false;
+let scanner=null, running=false, scanning=false, latestSku=null, latestType=null;
 
 function day(){const k=todayKey(); if(!db[k]) db[k]={items:{},history:[]}; return db[k]}
 function save(){localStorage.setItem(KEY,JSON.stringify(db))}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
 function vibrate(){ try { if (navigator.vibrate) navigator.vibrate([80,40,80]); } catch(e) {} }
 function render(){
- const d=day(), rows=Object.entries(d.items).sort((a,b)=>a[0].localeCompare(b[0]));
+ const d=day(), rows=Object.entries(d.items);
  document.getElementById("today").textContent=todayKey();
  document.getElementById("countLabel").textContent=rows.length+" SKU";
- document.getElementById("summary").innerHTML=rows.length?rows.map(([sku,n])=>
-   `<tr><td>${esc(sku)}</td><td class="qty">${n}<button class="minus" data-sku="${esc(sku)}">−1</button></td></tr>`).join("")
+ document.getElementById("summary").innerHTML=rows.length?rows.map(([sku,n])=>{
+   const isLatest=latestSku!==null && sku===latestSku;
+   const rowClass=isLatest && latestType==="new" ? ' class="latest-row"' : '';
+   const qtyClass=isLatest && latestType==="qty" ? 'qty latest-qty' : 'qty';
+   return `<tr${rowClass}><td>${esc(sku)}</td><td class="${qtyClass}">${n}<button class="minus" data-sku="${esc(sku)}">−1</button></td></tr>`;
+ }).join("")
    :'<tr><td colspan="2" class="small">まだ読み取りがありません</td></tr>';
  document.getElementById("total").textContent="合計 "+rows.reduce((s,[,n])=>s+n,0)+"個";
  document.getElementById("history").innerHTML=d.history.length?
@@ -128,7 +132,11 @@ function beep(){
 function add(sku,delta=1){
  sku=String(sku).trim(); if(!sku)return;
  const d=day(); const before=d.items[sku]||0; const after=Math.max(0,before+delta);
- if(after===0) delete d.items[sku]; else d.items[sku]=after;
+ latestSku=sku;
+ latestType=(delta>0 && before===0) ? "new" : "qty";
+ if(after===0) delete d.items[sku];
+ else if(delta>0 && before===0) d.items={ [sku]:after, ...d.items };
+ else d.items[sku]=after;
  d.history.push({time:new Date().toLocaleTimeString("ja-JP"),sku,delta,after});
  save(); render();
  if(delta>0){ vibrate(); document.getElementById("last").innerHTML=`最終読み取り：<strong>${esc(sku)}</strong>　＋1 → ${after}`; document.getElementById("status").textContent="読み取り成功 ✓";}
@@ -211,7 +219,7 @@ exportHistoryBtn.onclick=()=>{
 };
 resetBtn.onclick=()=>{
  if(confirm("今日の集計・履歴をすべて削除します。よろしいですか？")){
-   db[todayKey()]={items:{},history:[]};save();render();
+   db[todayKey()]={items:{},history:[]}; latestSku=null; latestType=null; save();render();
  }
 };
 function renderDates(){
