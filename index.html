@@ -96,7 +96,7 @@ function save(){localStorage.setItem(KEY,JSON.stringify(db))}
 function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
 function vibrate(){ try { if (navigator.vibrate) navigator.vibrate([80,40,80]); } catch(e) {} }
 function render(){
- const d=day(), rows=Object.entries(d.items).sort((a,b)=>a[0].localeCompare(b[0]));
+ const d=day(), rows=Object.entries(d.items);
  document.getElementById("today").textContent=todayKey();
  document.getElementById("countLabel").textContent=rows.length+" SKU";
  document.getElementById("summary").innerHTML=rows.length?rows.map(([sku,n])=>
@@ -127,13 +127,31 @@ function beep(){
 }
 function add(sku,delta=1){
  sku=String(sku).trim(); if(!sku)return;
- const d=day(); const before=d.items[sku]||0; const after=Math.max(0,before+delta);
- if(after===0) delete d.items[sku]; else d.items[sku]=after;
+ const d=day();
+ const exists=Object.prototype.hasOwnProperty.call(d.items,sku);
+ const before=exists ? d.items[sku] : 0;
+ const after=Math.max(0,before+delta);
+
+ if(after===0){
+   delete d.items[sku];
+ }else if(!exists && delta>0){
+   // 新しいSKUは一覧の先頭に追加
+   d.items={ [sku]: after, ...d.items };
+ }else{
+   // 既存SKUは現在の位置を維持
+   d.items[sku]=after;
+ }
+
  d.history.push({time:new Date().toLocaleTimeString("ja-JP"),sku,delta,after});
  save(); render();
- if(delta>0){ vibrate(); document.getElementById("last").innerHTML=`最終読み取り：<strong>${esc(sku)}</strong>　＋1 → ${after}`; document.getElementById("status").textContent="読み取り成功 ✓";}
+
+ if(delta>0){
+  vibrate();
+  beep();
+  document.getElementById("last").innerHTML=`最終読み取り：<strong>${esc(sku)}</strong>　＋1 → ${after}`;
+  document.getElementById("status").textContent="読み取り成功 ✓";
+ }
 }
-function minus(sku){add(sku,-1)}
 window.minus=minus;
 
 async function start(){
@@ -222,7 +240,7 @@ function renderDates(){
 function renderPast(){
  const k=document.getElementById("dateSelect").value,d=db[k];
  if(!d){pastSummary.innerHTML="";return}
- pastSummary.innerHTML=Object.entries(d.items).sort((a,b)=>a[0].localeCompare(b[0]))
+ pastSummary.innerHTML=Object.entries(d.items)
    .map(([sku,n])=>`${esc(sku)}　<b>${n}</b>`).join("<br>")||"データなし";
 }
 dateSelect.onchange=renderPast;
