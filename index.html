@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#222">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon.svg">
+<title>SKU QRカウンター</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;color:#222;background:#f5f5f5}
+*{box-sizing:border-box} body{margin:0;padding:0 0 32px}
+header{position:sticky;top:0;z-index:5;background:#222;color:#fff;padding:14px 16px calc(14px + env(safe-area-inset-top));}
+h1{font-size:18px;margin:0 0 8px}.date{font-size:13px;opacity:.8}
+main{max-width:720px;margin:auto;padding:14px}
+.card{background:#fff;border-radius:14px;padding:14px;margin-bottom:14px;box-shadow:0 1px 4px #0001}
+#reader{width:100%;overflow:hidden;border-radius:12px;background:#111;min-height:120px}
+button,select{font:inherit;border:0;border-radius:10px;padding:11px 14px;background:#222;color:#fff}
+#scanBtn{background:#0b6bcb;font-weight:700}
+.latest-row td{background:#fff3bf}
+.latest-qty{background:#ffe08a !important;border-radius:8px;font-weight:800}
+button.secondary{background:#eee;color:#222}button.danger{background:#b42318}
+button:disabled{opacity:.45}
+.controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.status{font-size:14px;margin-top:10px;min-height:20px}
+.last{font-size:15px;margin-top:10px}.last strong{font-size:19px}
+table{width:100%;border-collapse:collapse}th,td{padding:10px 5px;border-bottom:1px solid #eee;text-align:left}th:last-child,td:last-child{text-align:right}
+.qty{font-weight:700;text-align:right}.minus{padding:6px 10px;margin-left:8px;background:#eee;color:#222}
+.total{font-size:18px;font-weight:700;text-align:right;margin-top:12px}
+.history{max-height:280px;overflow:auto;font-size:13px}.history div{padding:7px 0;border-bottom:1px solid #eee}
+.small{font-size:12px;color:#666}
+.row{display:flex;justify-content:space-between;gap:10px;align-items:center}
+input{font:inherit;width:100%;padding:10px;border:1px solid #ddd;border-radius:10px}
+details summary{cursor:pointer;font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <h1>SKU QRカウンター</h1>
+  <div class="date" id="today"></div>
+</header>
+<main>
+<section class="card">
+  <div id="reader"></div>
+  <div class="controls">
+    <button id="startBtn">カメラを開始</button>
+    <button id="scanBtn" disabled>QRを読み取る</button>
+    <button id="stopBtn" class="secondary" disabled>カメラ停止</button>
+  </div>
+  <div class="status" id="status">「カメラを開始」を押してください。</div>
+  <div class="last" id="last"></div>
+</section>
+
+<section class="card">
+  <div class="row"><strong>今日の集計</strong><span class="small" id="countLabel"></span></div>
+  <table>
+    <thead><tr><th>SKU</th><th>数量</th></tr></thead>
+    <tbody id="summary"></tbody>
+  </table>
+  <div class="total" id="total">合計 0個</div>
+  <div class="controls">
+    <button id="exportBtn">CSV出力</button>
+    <button id="exportHistoryBtn" class="secondary">履歴CSV</button>
+    <button id="resetBtn" class="danger">今日のデータをリセット</button>
+  </div>
+</section>
+
+<section class="card">
+  <details>
+    <summary>読み取り履歴</summary>
+    <div class="history" id="history"></div>
+  </details>
+</section>
+
+<section class="card">
+  <details>
+    <summary>過去の日付</summary>
+    <select id="dateSelect" style="margin-top:10px"></select>
+    <div id="pastSummary" style="margin-top:10px"></div>
+  </details>
+</section>
+
+<section class="card small">
+  <strong>保存について</strong><br>
+  データはこのiPhoneのブラウザ内に保存されます。別端末とは共有されません。定期的にCSVを書き出してバックアップしてください。
+</section>
+</main>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const KEY="sku_qr_counter_v1";
+const todayKey=()=>new Date().toLocaleDateString("sv-SE");
+let db=JSON.parse(localStorage.getItem(KEY)||"{}");
+let scanner=null, running=false, scanning=false, latestSku=null;
+
+function day(){const k=todayKey(); if(!db[k]) db[k]={items:{},history:[]}; return db[k]}
+function save(){localStorage.setItem(KEY,JSON.stringify(db))}
+function esc(s){return String(s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]))}
+function vibrate(){ try { if (navigator.vibrate) navigator.vibrate([80,40,80]); } catch(e) {} }
+function render(){
+ const d=day(), rows=Object.entries(d.items);
+ document.getElementById("today").textContent=todayKey();
+ document.getElementById("countLabel").textContent=rows.length+" SKU";
+ document.getElementById("summary").innerHTML=rows.length?rows.map(([sku,n])=>{
+   const isLatest=latestSku!==null && sku===latestSku;
+   return `<tr class="${isLatest?'latest-row':''}">
+     <td>${esc(sku)}</td>
+     <td class="qty ${isLatest?'latest-qty':''}">${n}<button class="minus" data-sku="${esc(sku)}">−1</button></td>
+   </tr>`;
+ }).join("")
+ :'<tr><td colspan="2" class="small">まだ読み取りがありません</td></tr>';
+ document.getElementById("total").textContent="合計 "+rows.reduce((s,[,n])=>s+n,0)+"個";
+ document.getElementById("history").innerHTML=d.history.length?
+   d.history.slice().reverse().map(x=>`<div>${esc(x.time)}　${esc(x.sku)}　<span>${x.delta>0?"+1":"−1"}</span> → ${x.after}</div>`).join("")
+   :'<div class="small">履歴なし</div>';
+ document.querySelectorAll(".minus").forEach(btn => { btn.addEventListener("click", () => minus(btn.dataset.sku)); });
+ renderDates();
+}
+let audioCtx=null;
+function beep(){
+  try{
+    if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    if(audioCtx.state==="suspended") audioCtx.resume();
+    const osc=audioCtx.createOscillator();
+    const gain=audioCtx.createGain();
+    osc.type="sine";
+    osc.frequency.value=880;
+    gain.gain.setValueAtTime(0.0001,audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.12,audioCtx.currentTime+0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001,audioCtx.currentTime+0.09);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime+0.1);
+  }catch(e){}
+}
+function add(sku,delta=1){
+ sku=String(sku).trim(); if(!sku)return;
+ const d=day();
+ latestSku=sku;
+ const exists=Object.prototype.hasOwnProperty.call(d.items,sku);
+ const before=exists ? d.items[sku] : 0;
+ const after=Math.max(0,before+delta);
+
+ if(after===0){
+   delete d.items[sku];
+ }else if(!exists && delta>0){
+   // 新しいSKUは一覧の先頭に追加
+   d.items={ [sku]: after, ...d.items };
+ }else{
+   // 既存SKUは現在の位置を維持
+   d.items[sku]=after;
+ }
+
+ d.history.push({time:new Date().toLocaleTimeString("ja-JP"),sku,delta,after});
+ save(); render();
+
+ if(delta>0){
+  vibrate();
+  beep();
+  document.getElementById("last").innerHTML=`最終読み取り：<strong>${esc(sku)}</strong>　＋1 → ${after}`;
+  document.getElementById("status").textContent="読み取り成功 ✓";
+ }
+}
+window.minus=minus;
+
+async function start(){
+ if(running)return;
+ const startBtn=document.getElementById("startBtn");
+ const scanBtn=document.getElementById("scanBtn");
+ const stopBtn=document.getElementById("stopBtn");
+ const status=document.getElementById("status");
+ try{
+   audioCtx=audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+   if(audioCtx.state==="suspended") await audioCtx.resume();
+ }catch(e){}
+ status.textContent="カメラを起動しています…";
+ scanner=new Html5Qrcode("reader");
+ try{
+   await scanner.start(
+     {facingMode:"environment"},
+     {fps:15,qrbox:{width:250,height:250}},
+     onScan,
+     ()=>{}
+   );
+   running=true;
+   scanning=false;
+   startBtn.disabled=true;
+   scanBtn.disabled=false;
+   stopBtn.disabled=false;
+   status.textContent="カメラ起動中。QRを合わせて「QRを読み取る」を押してください。押すと次に認識したQRを1回だけ読み取ります。";
+ }catch(e){
+   scanner=null;
+   const detail = e && e.message ? ` (${e.message})` : "";
+   status.textContent="カメラを起動できませんでした。Safariのカメラ許可とHTTPS接続を確認してください。" + detail;
+ }
+}
+
+async function stop(){
+ const startBtn=document.getElementById("startBtn");
+ const scanBtn=document.getElementById("scanBtn");
+ const stopBtn=document.getElementById("stopBtn");
+ if(!scanner)return;
+ try{await scanner.stop();scanner.clear()}catch(e){}
+ scanner=null;
+ running=false;
+ scanning=false;
+ startBtn.disabled=false;
+ scanBtn.disabled=true;
+ stopBtn.disabled=true;
+ document.getElementById("status").textContent="カメラを停止しました。";
+}
+
+function scanOnce(){
+ const scanBtn=document.getElementById("scanBtn");
+ if(!running || scanning)return;
+ scanning=true;
+ scanBtn.disabled=true;
+ document.getElementById("status").textContent="読み取り中…";
+}
+
+function onScan(text){
+ const scanBtn=document.getElementById("scanBtn");
+ if(!scanning)return;
+ scanning=false;
+ add(text,1);
+ scanBtn.disabled=false;
+ document.getElementById("status").textContent="読み取り成功 ✓　次の商品はQRを合わせてボタンを押してください。";
+}
+
+document.getElementById("startBtn").addEventListener("click", start);
+document.getElementById("scanBtn").addEventListener("click", scanOnce);
+document.getElementById("stopBtn").addEventListener("click", stop);
+
+
+function csv(rows){return rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\\n")}
+function download(name,text){
+ const blob=new Blob(["\\ufeff"+text],{type:"text/csv;charset=utf-8"});
+ const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();
+ setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
+exportBtn.onclick=()=>{
+ const d=day(); const rows=[["SKU","数量"],...Object.entries(d.items).sort((a,b)=>a[0].localeCompare(b[0]))];
+ download(`SKU集計_${todayKey()}.csv`,csv(rows));
+};
+exportHistoryBtn.onclick=()=>{
+ const d=day(); const rows=[["時刻","SKU","操作","読み取り後数量"],...d.history.map(x=>[x.time,x.sku,x.delta>0?"+1":"-1",x.after])];
+ download(`SKU履歴_${todayKey()}.csv`,csv(rows));
+};
+resetBtn.onclick=()=>{
+ if(confirm("今日の集計・履歴をすべて削除します。よろしいですか？")){
+   db[todayKey()]={items:{},history:[]};latestSku=null;save();render();
+ }
+};
+function renderDates(){
+ const sel=document.getElementById("dateSelect"), dates=Object.keys(db).sort().reverse();
+ sel.innerHTML=dates.length?dates.map(d=>`<option value="${d}">${d}</option>`).join(""):'<option>履歴なし</option>';
+ renderPast();
+}
+function renderPast(){
+ const k=document.getElementById("dateSelect").value,d=db[k];
+ if(!d){pastSummary.innerHTML="";return}
+ pastSummary.innerHTML=Object.entries(d.items)
+   .map(([sku,n])=>`${esc(sku)}　<b>${n}</b>`).join("<br>")||"データなし";
+}
+dateSelect.onchange=renderPast;
+render();
+</script>
+</body>
+</html>
